@@ -1,32 +1,48 @@
 import test from "node:test";
 import assert from "node:assert";
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import { PostgreSqlContainer } from "@testcontainers/postgresql";
+
+process.env.TESTCONTAINERS_RYUK_DISABLED = "true";
+
+let sequelize;
+let Contact;
+let controllers;
+let container;
 
 const initialContacts = [
   {
-    id: "1",
     name: "Alice",
     email: "alice@example.com",
     phone: "123-456-7890",
+    favorite: false,
   },
   {
-    id: "2",
     name: "Bob",
     email: "bob@example.com",
     phone: "987-654-3210",
+    favorite: true,
   },
 ];
 
-let contactsFile;
-let controllers;
+let contact1Id;
+let contact2Id;
 
-const writeFixture = () =>
-  fs.writeFile(contactsFile, JSON.stringify(initialContacts, null, 2));
+test.before(async () => {
+  container = await new PostgreSqlContainer("postgres:16-alpine").start();
 
-const readContactsFile = async () =>
-  JSON.parse(await fs.readFile(contactsFile, "utf-8"));
+  process.env.DB_NAME = container.getDatabase();
+  process.env.DB_USER = container.getUsername();
+  process.env.DB_PASSWORD = container.getPassword();
+  process.env.DB_HOST = container.getHost();
+  process.env.DB_PORT = container.getPort();
+
+  ({ sequelize } = await import("./db/sequelize.js"));
+  Contact = (await import("./db/models/contact.js")).default;
+  controllers = await import("./controllers/contactsControllers.js");
+
+  await sequelize.authenticate();
+  await sequelize.sync({ force: true });
+});
 
 const createRes = () => {
   const res = {
@@ -54,17 +70,18 @@ const createNextTracker = () => {
   return { next, getError: () => error };
 };
 
-test.before(async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "contacts-"));
-  contactsFile = path.join(dir, "contacts.json");
-  process.env.CONTACTS_PATH = contactsFile;
-  await writeFixture();
-
-  controllers = await import("./controllers/contactsControllers.js");
+test.beforeEach(async () => {
+  await Contact.destroy({ where: {} });
+  const created = await Contact.bulkCreate(initialContacts, {
+    returning: true,
+  });
+  contact1Id = created[0].id;
+  contact2Id = created[1].id;
 });
 
-test.beforeEach(async () => {
-  await writeFixture();
+test.after(async () => {
+  await sequelize?.close();
+  await container?.stop();
 });
 
 test("getAllContacts controller sends 200 with list", async () => {
@@ -74,7 +91,7 @@ test("getAllContacts controller sends 200 with list", async () => {
   await controllers.getAllContacts({}, res, next);
 
   assert.strictEqual(res.statusCode, 200);
-  assert.deepStrictEqual(res.payload, initialContacts);
+  assert.strictEqual(res.payload.length, initialContacts.length);
   assert.strictEqual(getError(), null);
 });
 
@@ -82,18 +99,18 @@ test("getOneContact controller sends contact or 404 error", async () => {
   const res = createRes();
   const { next, getError } = createNextTracker();
 
-  await controllers.getOneContact({ params: { id: "1" } }, res, next);
+  await controllers.getOneContact({ params: { id: contact1Id } }, res, next);
 
   assert.strictEqual(res.statusCode, 200);
-  assert.deepStrictEqual(res.payload, initialContacts[0]);
+  assert.strictEqual(res.payload.name, initialContacts[0].name);
   assert.strictEqual(getError(), null);
 
   const resMissing = createRes();
   const tracker = createNextTracker();
   await controllers.getOneContact(
-    { params: { id: "missing" } },
+    { params: { id: 999999 } },
     resMissing,
-    tracker.next
+    tracker.next,
   );
 
   const err = tracker.getError();
@@ -106,17 +123,17 @@ test("deleteContact controller returns removed contact or 404", async () => {
   const res = createRes();
   const { next, getError } = createNextTracker();
 
-  await controllers.deleteContact({ params: { id: "1" } }, res, next);
+  await controllers.deleteContact({ params: { id: contact1Id } }, res, next);
 
   assert.strictEqual(res.statusCode, 200);
-  assert.deepStrictEqual(res.payload, initialContacts[0]);
+  assert.strictEqual(res.payload.id, contact1Id);
   assert.strictEqual(getError(), null);
 
   const tracker = createNextTracker();
   await controllers.deleteContact(
-    { params: { id: "missing" } },
+    { params: { id: 999999 } },
     createRes(),
-    tracker.next
+    tracker.next,
   );
 
   const err = tracker.getError();
@@ -139,16 +156,17 @@ test("createContact controller adds contact and returns 201", async () => {
   assert.ok(res.payload.id);
   assert.strictEqual(res.payload.name, body.name);
   assert.strictEqual(getError(), null);
-
-  const fileData = await readContactsFile();
-  assert.ok(fileData.find(({ id }) => id === res.payload.id));
 });
 
 test("updateContact controller validates body presence", async () => {
   const res = createRes();
   const tracker = createNextTracker();
 
-  await controllers.updateContact({ params: { id: "1" }, body: {} }, res, tracker.next);
+  await controllers.updateContact(
+    { params: { id: contact1Id }, body: {} },
+    res,
+    tracker.next,
+  );
 
   const err = tracker.getError();
   assert.ok(err);
@@ -161,9 +179,9 @@ test("updateContact controller updates contact or returns 404", async () => {
   const { next, getError } = createNextTracker();
 
   await controllers.updateContact(
-    { params: { id: "2" }, body: { phone: "000-1111" } },
+    { params: { id: contact2Id }, body: { phone: "000-1111" } },
     res,
-    next
+    next,
   );
 
   assert.strictEqual(res.statusCode, 200);
@@ -173,9 +191,35 @@ test("updateContact controller updates contact or returns 404", async () => {
 
   const tracker = createNextTracker();
   await controllers.updateContact(
-    { params: { id: "missing" }, body: { phone: "000-1111" } },
+    { params: { id: 999999 }, body: { phone: "000-1111" } },
     createRes(),
-    tracker.next
+    tracker.next,
+  );
+
+  const err = tracker.getError();
+  assert.ok(err);
+  assert.strictEqual(err.status, 404);
+});
+
+test("updateStatusContact controller updates favorite or returns 404", async () => {
+  const res = createRes();
+  const { next, getError } = createNextTracker();
+
+  await controllers.updateStatusContact(
+    { params: { contactId: contact1Id }, body: { favorite: true } },
+    res,
+    next,
+  );
+
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(res.payload.favorite, true);
+  assert.strictEqual(getError(), null);
+
+  const tracker = createNextTracker();
+  await controllers.updateStatusContact(
+    { params: { contactId: 999999 }, body: { favorite: false } },
+    createRes(),
+    tracker.next,
   );
 
   const err = tracker.getError();

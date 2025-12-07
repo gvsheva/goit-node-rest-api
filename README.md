@@ -14,6 +14,9 @@ Set these in a `.env` file or your shell:
 - `DB_PORT` - database port (default `5432`)
 - `DB_SSL` - use SSL for DB connection (`true`/`false`, default `false`)
 - `JWT_SECRET` - secret for signing JWTs (default fallback exists, set your own)
+- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` - SMTP credentials for sending mail (nodemailer)
+- `SMTP_SECURE` - `true`/`false` for secure connection (default `true`)
+- `SMTP_FROM` - optional “from” address (defaults to `SMTP_USER`)
 
 ## Install
 ```bash
@@ -48,6 +51,8 @@ Docker must be running; tests will start a temporary Postgres container automati
 - `GET /api/auth/current` — requires auth; returns `{ email, subscription }`
 - `PATCH /api/auth/subscription` — requires auth; body: `{ subscription }` with one of `starter|pro|business`
 - `PATCH /api/auth/avatars` — multipart/form-data with `avatar` file; requires auth; updates `avatarURL`
+- `GET /api/auth/verify/:verificationToken` — email verification link
+- `POST /api/auth/verify` — body: `{ email }`; resends verification email if not verified
 
 All contacts routes require auth; contacts are scoped per user (owner). Pagination/filtering: `GET /api/contacts?page=1&limit=20&favorite=true`.
 

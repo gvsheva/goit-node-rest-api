@@ -8,11 +8,14 @@ import {
   getCurrent,
   updateSubscription,
   updateAvatar,
+  verifyEmail,
+  resendVerifyEmail,
 } from "../controllers/authControllers.js";
 import {
   registerSchema,
   loginSchema,
   updateSubscriptionSchema,
+  verifyEmailSchema,
 } from "../schemas/authSchemas.js";
 import upload from "../middleware/upload.js";
 
@@ -33,6 +36,12 @@ authRouter.patch(
   authenticate,
   upload.single("avatar"),
   updateAvatar
+);
+authRouter.get("/verify/:verificationToken", verifyEmail);
+authRouter.post(
+  "/verify",
+  validateBody(verifyEmailSchema),
+  resendVerifyEmail
 );
 
 export default authRouter;

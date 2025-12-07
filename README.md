@@ -47,5 +47,8 @@ Docker must be running; tests will start a temporary Postgres container automati
 - `POST /api/auth/logout` — requires `Authorization: Bearer <token>`
 - `GET /api/auth/current` — requires auth; returns `{ email, subscription }`
 - `PATCH /api/auth/subscription` — requires auth; body: `{ subscription }` with one of `starter|pro|business`
+- `PATCH /api/auth/avatars` — multipart/form-data with `avatar` file; requires auth; updates `avatarURL`
 
 All contacts routes require auth; contacts are scoped per user (owner). Pagination/filtering: `GET /api/contacts?page=1&limit=20&favorite=true`.
+
+Static avatars are served from `/avatars/...`; uploaded files are stored under `public/avatars`, incoming files land in `temp/` before being moved.

@@ -8,9 +8,17 @@ import {
   updateStatusContact as updateStatusContactService,
 } from "../services/contactsServices.js";
 
-export const getAllContacts = async (_, res, next) => {
+export const getAllContacts = async (req, res, next) => {
   try {
-    const contacts = await listContactsService();
+    const { id: owner } = req.user;
+    const { page = 1, limit = 20, favorite } = req.query;
+    const favoriteFilter =
+      favorite === undefined ? undefined : favorite === "true";
+    const contacts = await listContactsService(owner, {
+      page,
+      limit,
+      favorite: favoriteFilter,
+    });
     res.status(200).json(contacts);
   } catch (error) {
     next(error);
@@ -20,7 +28,8 @@ export const getAllContacts = async (_, res, next) => {
 export const getOneContact = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const contact = await getContactByIdService(id);
+    const { id: owner } = req.user;
+    const contact = await getContactByIdService(id, owner);
 
     if (!contact) {
       return next(HttpError(404, "Not found"));
@@ -35,7 +44,8 @@ export const getOneContact = async (req, res, next) => {
 export const deleteContact = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const removedContact = await removeContactService(id);
+    const { id: owner } = req.user;
+    const removedContact = await removeContactService(id, owner);
 
     if (!removedContact) {
       return next(HttpError(404, "Not found"));
@@ -50,7 +60,14 @@ export const deleteContact = async (req, res, next) => {
 export const createContact = async (req, res, next) => {
   try {
     const { name, email, phone, favorite } = req.body;
-    const newContact = await addContactService(name, email, phone, favorite);
+    const { id: owner } = req.user;
+    const newContact = await addContactService(
+      name,
+      email,
+      phone,
+      favorite,
+      owner
+    );
 
     res.status(201).json(newContact);
   } catch (error) {
@@ -65,7 +82,8 @@ export const updateContact = async (req, res, next) => {
     }
 
     const { id } = req.params;
-    const updatedContact = await updateContactService(id, req.body);
+    const { id: owner } = req.user;
+    const updatedContact = await updateContactService(id, req.body, owner);
 
     if (!updatedContact) {
       return next(HttpError(404, "Not found"));
@@ -80,7 +98,12 @@ export const updateContact = async (req, res, next) => {
 export const updateStatusContact = async (req, res, next) => {
   try {
     const { contactId } = req.params;
-    const updatedContact = await updateStatusContactService(contactId, req.body);
+    const { id: owner } = req.user;
+    const updatedContact = await updateStatusContactService(
+      contactId,
+      req.body,
+      owner
+    );
 
     if (!updatedContact) {
       return next(HttpError(404, "Not found"));

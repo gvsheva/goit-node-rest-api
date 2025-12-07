@@ -6,19 +6,18 @@ const {
   DB_PASSWORD,
   DB_HOST = "localhost",
   DB_PORT = 5432,
-  DB_SSL_REQUIRE = "false",
+  DB_SSL = "false",
 } = process.env;
 
 export const sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
   host: DB_HOST,
   port: DB_PORT,
-  dialect: "postgres",
-  dialectOptions: {
-    ssl: {
-      require: DB_SSL_REQUIRE === "true",
-    },
-  },
   logging: false,
+  dialect: "postgres",
+  dialectOptions:
+    DB_SSL === "true"
+      ? { ssl: { require: true, rejectUnauthorized: false } }
+      : {},
 });
 
 export const initDb = async () => {

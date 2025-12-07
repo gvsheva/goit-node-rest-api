@@ -7,6 +7,7 @@ process.env.TESTCONTAINERS_RYUK_DISABLED = "true";
 let sequelize;
 let Contact;
 let controllers;
+let User;
 let container;
 
 const initialContacts = [
@@ -26,6 +27,7 @@ const initialContacts = [
 
 let contact1Id;
 let contact2Id;
+let ownerId;
 
 test.before(async () => {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
@@ -38,6 +40,7 @@ test.before(async () => {
 
   ({ sequelize } = await import("./db/sequelize.js"));
   Contact = (await import("./db/models/contact.js")).default;
+  User = (await import("./db/models/user.js")).default;
   controllers = await import("./controllers/contactsControllers.js");
 
   await sequelize.authenticate();
@@ -72,9 +75,18 @@ const createNextTracker = () => {
 
 test.beforeEach(async () => {
   await Contact.destroy({ where: {} });
-  const created = await Contact.bulkCreate(initialContacts, {
-    returning: true,
+  await User.destroy({ where: {} });
+  const owner = await User.create({
+    email: "owner@example.com",
+    password: "hashed",
   });
+  ownerId = owner.id;
+  const created = await Contact.bulkCreate(
+    initialContacts.map((contact) => ({ ...contact, owner: ownerId })),
+    {
+      returning: true,
+    },
+  );
   contact1Id = created[0].id;
   contact2Id = created[1].id;
 });
@@ -88,7 +100,11 @@ test("getAllContacts controller sends 200 with list", async () => {
   const res = createRes();
   const { next, getError } = createNextTracker();
 
-  await controllers.getAllContacts({}, res, next);
+  await controllers.getAllContacts(
+    { user: { id: ownerId }, query: {} },
+    res,
+    next,
+  );
 
   assert.strictEqual(res.statusCode, 200);
   assert.strictEqual(res.payload.length, initialContacts.length);
@@ -99,7 +115,11 @@ test("getOneContact controller sends contact or 404 error", async () => {
   const res = createRes();
   const { next, getError } = createNextTracker();
 
-  await controllers.getOneContact({ params: { id: contact1Id } }, res, next);
+  await controllers.getOneContact(
+    { params: { id: contact1Id }, user: { id: ownerId } },
+    res,
+    next,
+  );
 
   assert.strictEqual(res.statusCode, 200);
   assert.strictEqual(res.payload.name, initialContacts[0].name);
@@ -108,7 +128,7 @@ test("getOneContact controller sends contact or 404 error", async () => {
   const resMissing = createRes();
   const tracker = createNextTracker();
   await controllers.getOneContact(
-    { params: { id: 999999 } },
+    { params: { id: 999999 }, user: { id: ownerId } },
     resMissing,
     tracker.next,
   );
@@ -123,7 +143,11 @@ test("deleteContact controller returns removed contact or 404", async () => {
   const res = createRes();
   const { next, getError } = createNextTracker();
 
-  await controllers.deleteContact({ params: { id: contact1Id } }, res, next);
+  await controllers.deleteContact(
+    { params: { id: contact1Id }, user: { id: ownerId } },
+    res,
+    next,
+  );
 
   assert.strictEqual(res.statusCode, 200);
   assert.strictEqual(res.payload.id, contact1Id);
@@ -131,7 +155,7 @@ test("deleteContact controller returns removed contact or 404", async () => {
 
   const tracker = createNextTracker();
   await controllers.deleteContact(
-    { params: { id: 999999 } },
+    { params: { id: 999999 }, user: { id: ownerId } },
     createRes(),
     tracker.next,
   );
@@ -150,7 +174,7 @@ test("createContact controller adds contact and returns 201", async () => {
     phone: "555-1234",
   };
 
-  await controllers.createContact({ body }, res, next);
+  await controllers.createContact({ body, user: { id: ownerId } }, res, next);
 
   assert.strictEqual(res.statusCode, 201);
   assert.ok(res.payload.id);
@@ -163,7 +187,7 @@ test("updateContact controller validates body presence", async () => {
   const tracker = createNextTracker();
 
   await controllers.updateContact(
-    { params: { id: contact1Id }, body: {} },
+    { params: { id: contact1Id }, body: {}, user: { id: ownerId } },
     res,
     tracker.next,
   );
@@ -179,7 +203,7 @@ test("updateContact controller updates contact or returns 404", async () => {
   const { next, getError } = createNextTracker();
 
   await controllers.updateContact(
-    { params: { id: contact2Id }, body: { phone: "000-1111" } },
+    { params: { id: contact2Id }, body: { phone: "000-1111" }, user: { id: ownerId } },
     res,
     next,
   );
@@ -191,7 +215,7 @@ test("updateContact controller updates contact or returns 404", async () => {
 
   const tracker = createNextTracker();
   await controllers.updateContact(
-    { params: { id: 999999 }, body: { phone: "000-1111" } },
+    { params: { id: 999999 }, body: { phone: "000-1111" }, user: { id: ownerId } },
     createRes(),
     tracker.next,
   );
@@ -206,7 +230,7 @@ test("updateStatusContact controller updates favorite or returns 404", async () 
   const { next, getError } = createNextTracker();
 
   await controllers.updateStatusContact(
-    { params: { contactId: contact1Id }, body: { favorite: true } },
+    { params: { contactId: contact1Id }, body: { favorite: true }, user: { id: ownerId } },
     res,
     next,
   );
@@ -217,7 +241,7 @@ test("updateStatusContact controller updates favorite or returns 404", async () 
 
   const tracker = createNextTracker();
   await controllers.updateStatusContact(
-    { params: { contactId: 999999 }, body: { favorite: false } },
+    { params: { contactId: 999999 }, body: { favorite: false }, user: { id: ownerId } },
     createRes(),
     tracker.next,
   );

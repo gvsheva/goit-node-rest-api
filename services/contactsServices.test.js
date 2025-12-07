@@ -6,8 +6,10 @@ process.env.TESTCONTAINERS_RYUK_DISABLED = "true";
 
 let sequelize;
 let Contact;
+let User;
 let services;
 let container;
+let ownerId;
 
 const initialContacts = [
     {
@@ -38,6 +40,7 @@ before(async () => {
 
     ({ sequelize } = await import("../db/sequelize.js"));
     Contact = (await import("../db/models/contact.js")).default;
+    User = (await import("../db/models/user.js")).default;
     services = await import("./contactsServices.js");
 
     await sequelize.authenticate();
@@ -46,9 +49,18 @@ before(async () => {
 
 beforeEach(async () => {
     await Contact.destroy({ where: {} });
-    const created = await Contact.bulkCreate(initialContacts, {
-        returning: true,
+    await User.destroy({ where: {} });
+    const owner = await User.create({
+        email: "owner@example.com",
+        password: "hashed",
     });
+    ownerId = owner.id;
+    const created = await Contact.bulkCreate(
+        initialContacts.map((contact) => ({ ...contact, owner: ownerId })),
+        {
+            returning: true,
+        },
+    );
     contact1Id = created[0].id;
     contact2Id = created[1].id;
 });
@@ -59,15 +71,15 @@ after(async () => {
 });
 
 test("listContacts returns all contacts", async () => {
-    const contacts = await services.listContacts();
+    const contacts = await services.listContacts(ownerId);
     assert.equal(contacts.length, initialContacts.length);
     assert.equal(contacts[0].name, initialContacts[0].name);
 });
 
 test("getContactById returns contact or null", async () => {
-    const contact = await services.getContactById(contact1Id);
+    const contact = await services.getContactById(contact1Id, ownerId);
     assert.equal(contact?.name, "Alice");
-    assert.equal(await services.getContactById(999999), null);
+    assert.equal(await services.getContactById(999999, ownerId), null);
 });
 
 test("addContact creates contact with optional favorite", async () => {
@@ -75,6 +87,8 @@ test("addContact creates contact with optional favorite", async () => {
         "Mango",
         "mango@example.com",
         "111-22-33",
+        false,
+        ownerId,
     );
     assert.equal(created.name, "Mango");
     assert.equal(created.favorite, false);
@@ -84,15 +98,16 @@ test("addContact creates contact with optional favorite", async () => {
         "kiwi@example.com",
         "000-00-00",
         true,
+        ownerId,
     );
     assert.equal(createdFav.favorite, true);
 });
 
 test("removeContact removes contact and returns removed item", async () => {
-    const removed = await services.removeContact(contact2Id);
+    const removed = await services.removeContact(contact2Id, ownerId);
     assert.equal(removed?.id, contact2Id);
 
-    const contacts = await services.listContacts();
+    const contacts = await services.listContacts(ownerId);
     assert.equal(contacts.length, initialContacts.length - 1);
     assert.ok(!contacts.some(({ id }) => id === contact2Id));
 });
@@ -100,13 +115,13 @@ test("removeContact removes contact and returns removed item", async () => {
 test("updateContact merges fields", async () => {
     const updated = await services.updateContact(contact1Id, {
         email: "new@example.com",
-    });
+    }, ownerId);
     assert.equal(updated?.email, "new@example.com");
 });
 
 test("updateStatusContact updates favorite flag", async () => {
     const updated = await services.updateStatusContact(contact1Id, {
         favorite: true,
-    });
+    }, ownerId);
     assert.equal(updated?.favorite, true);
 });
